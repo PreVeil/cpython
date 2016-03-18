@@ -319,8 +319,7 @@ def library_recipes():
                   "--without-cxx-binding",
                   "--without-ada",
                   "--without-curses-h",
-                  "--enable-shared",
-                  "--with-shared",
+                  "--without-shared",
                   "--without-debug",
                   "--without-normal",
                   "--without-tests",
@@ -330,7 +329,6 @@ def library_recipes():
                   "--sharedstatedir=/usr/com",
                   "--with-terminfo-dirs=/usr/share/terminfo",
                   "--with-default-terminfo-dir=/usr/share/terminfo",
-                  "--libdir=/Library/Frameworks/Python.framework/Versions/%s/lib"%(getVersion(),),
               ],
               patchscripts=[
                   ("ftp://invisible-island.net/ncurses//5.9/ncurses-5.9-20120616-patch.sh.bz2",
@@ -734,7 +732,7 @@ def parseOptions(args=None):
 
     CC, CXX = getTargetCompilers()
 
-    FW_VERSION_PREFIX = FW_PREFIX[:] + ["Versions", getVersion()]
+    FW_VERSION_PREFIX = ["preveil-lib"]
 
     print("-- Settings:")
     print("   * Source directory:    %s" % SRCDIR)
@@ -873,7 +871,7 @@ def build_universal_openssl(basedir, archList):
             "no-ssl3",
             "no-ssl3-method",
             # "enable-unit-test",
-            "shared",
+            "no-shared",
             "--install_prefix=%s"%shellQuote(archbase),
             "--prefix=%s"%os.path.join("/", *FW_VERSION_PREFIX),
             "--openssldir=/System/Library/OpenSSL",
@@ -922,10 +920,10 @@ def build_universal_openssl(basedir, archList):
     shlib_version_number = grepValue(os.path.join(archsrc, "Makefile"),
             "SHLIB_VERSION_NUMBER")
     #   e.g. -> "1.0.0"
-    libcrypto = "libcrypto.dylib"
+    libcrypto = "libcrypto.a"
     libcrypto_versioned = libcrypto.replace(".", "."+shlib_version_number+".")
     #   e.g. -> "libcrypto.1.0.0.dylib"
-    libssl = "libssl.dylib"
+    libssl = "libssl.a"
     libssl_versioned = libssl.replace(".", "."+shlib_version_number+".")
     #   e.g. -> "libssl.1.0.0.dylib"
 
@@ -942,10 +940,10 @@ def build_universal_openssl(basedir, archList):
             ]:
         runCommand("lipo -create -output " +
                     " ".join(shellQuote(
-                            os.path.join(fw, "lib", lib_versioned))
+                            os.path.join(fw, "lib", lib_unversioned))
                                     for fw in archbasefws))
         # and create an unversioned symlink of it
-        os.symlink(lib_versioned, os.path.join(basefw, "lib", lib_unversioned))
+        os.symlink(lib_unversioned, os.path.join(basefw, "lib", lib_versioned))
 
     # Create links in the temp include and lib dirs that will be injected
     # into the Python build so that setup.py can find them while building
@@ -1155,7 +1153,7 @@ def buildPython():
     os.environ['DYLD_LIBRARY_PATH'] = os.path.join(WORKDIR,
                                         'libraries', 'usr', 'local', 'lib')
     print("Running configure...")
-    runCommand("%s -C --enable-framework --enable-universalsdk=%s "
+    runCommand("%s -C --enable-universalsdk=%s "
                "--with-universal-archs=%s "
                "%s "
                "%s "
@@ -1178,10 +1176,6 @@ def buildPython():
     runCommand("make install DESTDIR=%s"%(
         shellQuote(rootDir)))
 
-    print("Running make frameworkinstallextras")
-    runCommand("make frameworkinstallextras DESTDIR=%s"%(
-        shellQuote(rootDir)))
-
     del os.environ['DYLD_LIBRARY_PATH']
     print("Copying required shared libraries")
     if os.path.exists(os.path.join(WORKDIR, 'libraries', 'Library')):
@@ -1190,16 +1184,13 @@ def buildPython():
                 WORKDIR, 'libraries', 'Library', 'Frameworks',
                 'Python.framework', 'Versions', getVersion(),
                 'lib')),
-            shellQuote(os.path.join(WORKDIR, '_root', 'Library', 'Frameworks',
-                'Python.framework', 'Versions', getVersion(),
-                'lib'))))
+            shellQuote(os.path.join(WORKDIR, '_root', 'usr', 'local', 'lib'))))
 
-    path_to_lib = os.path.join(rootDir, 'Library', 'Frameworks',
-                                'Python.framework', 'Versions',
-                                version, 'lib', 'python%s'%(version,))
+    path_to_lib = os.path.join(rootDir, 'usr', 'local', 'lib',
+        'python%s'%(version,))
 
     print("Fix file modes")
-    frmDir = os.path.join(rootDir, 'Library', 'Frameworks', 'Python.framework')
+    frmDir = os.path.join(rootDir, 'usr')
     gid = grp.getgrnam('admin').gr_gid
 
     shared_lib_error = False
@@ -1310,18 +1301,6 @@ def buildPython():
         fp.write('build_time_vars = ')
         pprint.pprint(vars, stream=fp)
         fp.close()
-
-    # Add symlinks in /usr/local/bin, using relative links
-    usr_local_bin = os.path.join(rootDir, 'usr', 'local', 'bin')
-    to_framework = os.path.join('..', '..', '..', 'Library', 'Frameworks',
-            'Python.framework', 'Versions', version, 'bin')
-    if os.path.exists(usr_local_bin):
-        shutil.rmtree(usr_local_bin)
-    os.makedirs(usr_local_bin)
-    for fn in os.listdir(
-                os.path.join(frmDir, 'Versions', version, 'bin')):
-        os.symlink(os.path.join(to_framework, fn),
-                   os.path.join(usr_local_bin, fn))
 
     os.chdir(curdir)
 
@@ -1616,48 +1595,6 @@ def main():
 
     # Now build python itself
     buildPython()
-
-    # And then build the documentation
-    # Remove the Deployment Target from the shell
-    # environment, it's no longer needed and
-    # an unexpected build target can cause problems
-    # when Sphinx and its dependencies need to
-    # be (re-)installed.
-    del os.environ['MACOSX_DEPLOYMENT_TARGET']
-    buildPythonDocs()
-
-
-    # Prepare the applications folder
-    folder = os.path.join(WORKDIR, "_root", "Applications", "Python %s"%(
-        getVersion(),))
-    fn = os.path.join(folder, "License.rtf")
-    patchFile("resources/License.rtf",  fn)
-    fn = os.path.join(folder, "ReadMe.rtf")
-    patchFile("resources/ReadMe.rtf",  fn)
-    fn = os.path.join(folder, "Update Shell Profile.command")
-    patchScript("scripts/postflight.patch-profile",  fn)
-    os.chmod(folder, STAT_0o755)
-    setIcon(folder, "../Icons/Python Folder.icns")
-
-    # Create the installer
-    buildInstaller()
-
-    # And copy the readme into the directory containing the installer
-    patchFile('resources/ReadMe.rtf',
-                os.path.join(WORKDIR, 'installer', 'ReadMe.rtf'))
-
-    # Ditto for the license file.
-    patchFile('resources/License.rtf',
-                os.path.join(WORKDIR, 'installer', 'License.rtf'))
-
-    fp = open(os.path.join(WORKDIR, 'installer', 'Build.txt'), 'w')
-    fp.write("# BUILD INFO\n")
-    fp.write("# Date: %s\n" % time.ctime())
-    fp.write("# By: %s\n" % pwd.getpwuid(os.getuid()).pw_gecos)
-    fp.close()
-
-    # And copy it to a DMG
-    buildDMG()
 
 if __name__ == "__main__":
     main()
