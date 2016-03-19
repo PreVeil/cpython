@@ -661,10 +661,9 @@ def checkEnvironment():
         base_path = base_path + ':' + OLD_DEVELOPER_TOOLS
     os.environ['PATH'] = base_path
     print("Setting default PATH: %s"%(os.environ['PATH']))
-    # Ensure ws have access to hg and to sphinx-build.
+    # Ensure ws have access to hg.
     # You may have to create links in /usr/bin for them.
     runCommand('hg --version')
-    runCommand('sphinx-build --version')
 
 def parseOptions(args=None):
     """
@@ -1101,26 +1100,6 @@ def buildLibraries():
 
     for recipe in library_recipes():
         buildRecipe(recipe, universal, ARCHLIST)
-
-
-
-def buildPythonDocs():
-    # This stores the documentation as Resources/English.lproj/Documentation
-    # inside the framwork. pydoc and IDLE will pick it up there.
-    print("Install python documentation")
-    rootDir = os.path.join(WORKDIR, '_root')
-    buildDir = os.path.join('../../Doc')
-    docdir = os.path.join(rootDir, 'pydocs')
-    curDir = os.getcwd()
-    os.chdir(buildDir)
-    # The Doc build changed for 3.4 (technically, for 3.4.1) and for 2.7.9
-    runCommand('make clean')
-    # Assume sphinx-build is on our PATH, checked in checkEnvironment
-    runCommand('make html')
-    os.chdir(curDir)
-    if not os.path.exists(docdir):
-        os.mkdir(docdir)
-    os.rename(os.path.join(buildDir, 'build', 'html'), docdir)
 
 
 def buildPython():
